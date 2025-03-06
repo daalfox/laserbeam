@@ -13,11 +13,11 @@ struct Message {
 }
 
 impl Message {
-    fn into_reply(self, msg_id: usize) -> Option<Self> {
+    fn into_reply(self, issuer: &mut Node) -> Option<Self> {
         Some(Self {
             src: self.dest,
             dest: self.src,
-            body: self.body.into_reply(msg_id)?,
+            body: self.body.into_reply(issuer)?,
         })
     }
 }
@@ -31,11 +31,11 @@ struct Body {
     payload: Payload,
 }
 impl Body {
-    fn into_reply(self, msg_id: usize) -> Option<Self> {
+    fn into_reply(self, issuer: &mut Node) -> Option<Self> {
         Some(Self {
-            id: Some(msg_id),
+            id: Some(issuer.increment_id()),
             in_reply_to: self.id,
-            payload: self.payload.into_reply()?,
+            payload: self.payload.into_reply(issuer)?,
         })
     }
 }
@@ -55,12 +55,23 @@ enum Payload {
     EchoOk {
         echo: String,
     },
+    Generate,
+    GenerateOk {
+        id: String,
+    },
 }
 impl Payload {
-    fn into_reply(self) -> Option<Self> {
+    fn into_reply(self, issuer: &mut Node) -> Option<Self> {
         match self {
-            Payload::Init { .. } => Some(Payload::InitOk),
+            Payload::Init { node_id, .. } => {
+                issuer.id = node_id;
+                Some(Payload::InitOk)
+            }
             Payload::Echo { echo } => Some(Payload::EchoOk { echo }),
+            Payload::Generate => Some(Payload::GenerateOk {
+                id: issuer.gen_unique_id(),
+            }),
+            Payload::GenerateOk { .. } => None,
             Payload::InitOk => None,
             Payload::EchoOk { .. } => None,
         }
@@ -86,11 +97,14 @@ impl Node {
         self.last_sent_msg_id
     }
 
-    fn handle(&mut self, input: Message, stdout: &mut StdoutLock) -> anyhow::Result<()> {
-        let reply = input.into_reply(0);
+    fn gen_unique_id(&self) -> String {
+        eprintln!("generating unique id for node {}", self.id);
+        let gen_id = format!("{}-{}", self.id, self.last_sent_msg_id + 1);
+        gen_id
+    }
 
-        if let Some(mut reply) = reply {
-            reply.body.id = Some(self.increment_id());
+    fn handle(&mut self, input: Message, stdout: &mut StdoutLock) -> anyhow::Result<()> {
+        if let Some(reply) = input.into_reply(self) {
             serde_json::to_writer(&mut *stdout, &reply).context("couldn't serialize response")?;
             stdout
                 .write_all(b"\n")
@@ -108,10 +122,9 @@ async fn main() -> anyhow::Result<()> {
 
     let inputs = serde_json::Deserializer::from_reader(stdin).into_iter::<Message>();
 
+    let mut node = Node::new();
     for input in inputs {
         let input = input.context("couldn't deserialize input from maelstrom")?;
-
-        let mut node = Node::new();
 
         node.handle(input, &mut stdout)
             .context("couldn't handle request")?;
