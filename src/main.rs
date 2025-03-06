@@ -115,8 +115,7 @@ impl Node {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let stdin = stdin().lock();
     let mut stdout = stdout().lock();
 
