@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::io::{stdin, stdout, StdoutLock, Write};
+use std::{
+    collections::HashMap,
+    io::{stdin, stdout, StdoutLock, Write},
+};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -59,6 +62,18 @@ enum Payload {
     GenerateOk {
         id: String,
     },
+    Topology {
+        topology: HashMap<String, Vec<String>>,
+    },
+    TopologyOk,
+    Broadcast {
+        message: usize,
+    },
+    BroadcastOk,
+    Read,
+    ReadOk {
+        messages: Vec<usize>,
+    },
 }
 impl Payload {
     fn into_reply(self, issuer: &mut Node) -> Option<Self> {
@@ -71,9 +86,20 @@ impl Payload {
             Payload::Generate => Some(Payload::GenerateOk {
                 id: issuer.gen_unique_id(),
             }),
-            Payload::GenerateOk { .. } => None,
+            Payload::Broadcast { message } => {
+                issuer.seen_broadcasts.push(message);
+                Some(Payload::BroadcastOk)
+            }
+            Payload::Read => Some(Payload::ReadOk {
+                messages: issuer.seen_broadcasts.clone(),
+            }),
+            Payload::Topology { .. } => Some(Payload::TopologyOk),
             Payload::InitOk => None,
             Payload::EchoOk { .. } => None,
+            Payload::GenerateOk { .. } => None,
+            Payload::BroadcastOk => None,
+            Payload::ReadOk { .. } => None,
+            Payload::TopologyOk => None,
         }
     }
 }
@@ -81,6 +107,7 @@ impl Payload {
 struct Node {
     id: String,
     last_sent_msg_id: usize,
+    seen_broadcasts: Vec<usize>,
 }
 
 impl Node {
@@ -88,6 +115,7 @@ impl Node {
         Self {
             id: "".to_string(),
             last_sent_msg_id: 0,
+            seen_broadcasts: Vec::new(),
         }
     }
 
