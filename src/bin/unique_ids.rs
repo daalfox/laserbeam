@@ -41,6 +41,5 @@ enum Payload {
 }
 
 fn main() -> anyhow::Result<()> {
-    EchoNode::spawn::<Payload>()?;
-    Ok(())
+    EchoNode::spawn()
 }

@@ -2,18 +2,17 @@ use std::io::{stdin, stdout, BufRead, StdoutLock, Write};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use serde_json::from_str;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Message<Payload> {
+pub struct Message<P> {
     src: String,
     dest: String,
-    pub body: Body<Payload>,
+    pub body: Body<P>,
 }
 
-impl<Payload> Message<Payload> {
-    fn into_reply(self, msg_id: usize, reply_payload: Payload) -> Self {
-        Self {
+impl<P> Message<P> {
+    pub fn into_reply<U>(self, msg_id: usize, reply_payload: U) -> Message<U> {
+        Message {
             src: self.dest,
             dest: self.src,
             body: self.body.into_reply(msg_id, reply_payload),
@@ -22,16 +21,16 @@ impl<Payload> Message<Payload> {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Body<Payload> {
+pub struct Body<P> {
     #[serde(rename = "msg_id")]
     id: Option<usize>,
     in_reply_to: Option<usize>,
     #[serde(flatten)]
-    pub payload: Payload,
+    pub payload: P,
 }
-impl<Payload> Body<Payload> {
-    fn into_reply(self, msg_id: usize, reply_payload: Payload) -> Self {
-        Self {
+impl<P> Body<P> {
+    fn into_reply<U>(self, msg_id: usize, reply_payload: U) -> Body<U> {
+        Body {
             id: Some(msg_id),
             in_reply_to: self.id,
             payload: reply_payload,
@@ -54,7 +53,12 @@ pub enum InitOk {
 
 pub trait Node {
     type Payload;
-    fn spawn<P>() -> anyhow::Result<()>
+
+    fn from_init(init_msg: Message<Init>) -> Self;
+
+    fn handle(&mut self, input: &Self::Payload) -> Option<(usize, Self::Payload)>;
+
+    fn spawn() -> anyhow::Result<()>
     where
         Self: Sized,
         Self::Payload: for<'a> Deserialize<'a>,
@@ -66,7 +70,7 @@ pub trait Node {
         let mut init_msg = String::new();
         stdin.read_line(&mut init_msg)?;
 
-        let init_msg: Message<Init> = from_str(&init_msg)?;
+        let init_msg: Message<Init> = serde_json::from_str(&init_msg)?;
 
         let inputs =
             serde_json::Deserializer::from_reader(stdin).into_iter::<Message<Self::Payload>>();
@@ -86,29 +90,14 @@ pub trait Node {
         Ok(())
     }
 
-    fn from_init(init_msg: Message<Init>) -> Self;
-
-    fn reply_init(&self, msg: Message<Init>, stdout: &mut StdoutLock) -> anyhow::Result<()> {
-        serde_json::to_writer(
-            &mut *stdout,
-            &Message {
-                src: msg.dest,
-                dest: msg.src,
-                body: Body {
-                    id: Some(0),
-                    in_reply_to: msg.body.id,
-                    payload: InitOk::InitOk,
-                },
-            },
-        )?;
+    fn reply_init(&self, init_msg: Message<Init>, stdout: &mut StdoutLock) -> anyhow::Result<()> {
+        serde_json::to_writer(&mut *stdout, &init_msg.into_reply(0, InitOk::InitOk))?;
         stdout
             .write_all(b"\n")
             .context("failed to write trailing new line")?;
 
         Ok(())
     }
-
-    fn handle(&mut self, input: &Self::Payload) -> Option<(usize, <Self as Node>::Payload)>;
 
     fn reply(
         &self,
