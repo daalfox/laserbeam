@@ -2,6 +2,7 @@ use std::io::{stdin, stdout, BufRead, StdoutLock, Write};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Message<P> {
@@ -44,13 +45,6 @@ pub struct Init {
     pub node_ids: Vec<String>,
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-pub enum InitOk {
-    InitOk,
-}
-
 pub trait Node {
     type Payload;
 
@@ -91,7 +85,10 @@ pub trait Node {
     }
 
     fn reply_init(&self, init_msg: Message<Init>, stdout: &mut StdoutLock) -> anyhow::Result<()> {
-        serde_json::to_writer(&mut *stdout, &init_msg.into_reply(0, InitOk::InitOk))?;
+        serde_json::to_writer(
+            &mut *stdout,
+            &init_msg.into_reply(0, json!({ "type": "init_ok" })),
+        )?;
         stdout
             .write_all(b"\n")
             .context("failed to write trailing new line")?;
